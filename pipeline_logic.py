@@ -142,9 +142,14 @@ def normalize(data: pd.DataFrame, params: NormalizeParams) -> pd.DataFrame:
 
     Returns:
         DataFrame with numeric columns standardised.
+
+    Raises:
+        ValueError: If the DataFrame has no numeric columns to normalize.
     """
     scaler = StandardScaler()
     numeric_cols = data.select_dtypes(include=np.number).columns
+    if numeric_cols.empty:
+        raise ValueError("Normalize failed: No numeric columns found in the dataset.")
     data[numeric_cols] = scaler.fit_transform(data[numeric_cols])
     return data
 
@@ -159,9 +164,14 @@ def scale(data: pd.DataFrame, params: ScaleParams) -> pd.DataFrame:
 
     Returns:
         DataFrame with numeric columns rescaled.
+
+    Raises:
+        ValueError: If the DataFrame has no numeric columns to scale.
     """
     scaler = MinMaxScaler(feature_range=(params.min_value, params.max_value))
     numeric_cols = data.select_dtypes(include=np.number).columns
+    if numeric_cols.empty:
+        raise ValueError("Scale failed: No numeric columns found in the dataset.")
     data[numeric_cols] = scaler.fit_transform(data[numeric_cols])
     return data
 
@@ -215,10 +225,14 @@ def binarize(data: pd.DataFrame, params: BinarizeParams) -> pd.DataFrame:
         DataFrame with numeric columns binarized.
 
     Raises:
-        ValueError: If any numeric column still contains NaN values.
+        ValueError: If the DataFrame has no numeric columns to binarize, or
+            if any numeric column still contains NaN values.
     """
     binarizer = Binarizer(threshold=params.threshold)
     numeric_cols = data.select_dtypes(include=np.number).columns
+
+    if numeric_cols.empty:
+        raise ValueError("Binarization failed: No numeric columns found in the dataset.")
 
     if data[numeric_cols].isnull().any().any():
         raise ValueError(
@@ -241,15 +255,36 @@ def remove_outliers(data: pd.DataFrame, params: RemoveOutliersParams) -> pd.Data
 
     Returns:
         DataFrame with outlier rows removed.
+
+    Note:
+        Columns that are entirely NaN are skipped (there is no spread to
+        compute a fence from, and naively comparing against NaN fences
+        would wipe out every row). Columns with zero IQR are treated as
+        having no outliers to remove, mirroring
+        ``metadata_inference._column_outlier_pct``.
     """
     numeric_cols = data.select_dtypes(include=np.number).columns
+    skipped_cols = []
     for col in numeric_cols:
-        Q1 = data[col].quantile(0.25)
-        Q3 = data[col].quantile(0.75)
+        non_null = data[col].dropna()
+        if non_null.empty:
+            skipped_cols.append(col)
+            continue
+        Q1 = non_null.quantile(0.25)
+        Q3 = non_null.quantile(0.75)
         IQR = Q3 - Q1
+        if IQR == 0:
+            # No spread in this column, so nothing qualifies as an outlier.
+            continue
         lower = Q1 - params.iqr_multiplier * IQR
         upper = Q3 + params.iqr_multiplier * IQR
         data = data[(data[col] >= lower) & (data[col] <= upper)]
+    if skipped_cols:
+        import warnings
+        warnings.warn(
+            f"Remove Outliers: skipped all-NaN numeric column(s) {skipped_cols} "
+            "(no values to compute an IQR fence from)."
+        )
     return data
 
 def remove_nan_cols(data: pd.DataFrame, params: RemoveNaNColsParams) -> pd.DataFrame:

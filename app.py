@@ -361,7 +361,7 @@ with tab1:
                             if "session_id" in st.session_state:
                                 log_event(st.session_state.session_id, "recipe_replayed",
                                            f"{len(recipe_steps)} step(s)")
-                        except (ValueError, RuntimeError) as e:
+                        except (ValueError, RuntimeError, KeyError) as e:
                             st.warning(f"Some recipe steps were skipped or failed:\n\n{e}")
                 except (json.JSONDecodeError, AttributeError, TypeError) as e:
                     st.error(f"❌ Could not parse recipe file: {e}")
@@ -1079,9 +1079,16 @@ with tab2:
         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10, key="metadata_preview_rows")
         st.dataframe(df.head(num_rows), use_container_width=True)
 
+        # ⏺️ Column Type Inference and the Quality Report must reflect the
+        # CURRENT working copy (mutated by Undo / decision-tree actions /
+        # LLM cleaning on this tab), not the original upload (`df` /
+        # final_df) — otherwise they silently describe data the user has
+        # already changed or discarded (issue #22).
+        working_df = st.session_state.get("df", df)
+
         if st.button("🔍 Run Inference on Columns"):
             with st.spinner("Inferring column types and suggestions..."):
-                st.session_state.metadata_df = analyze_dataframe(df)
+                st.session_state.metadata_df = analyze_dataframe(working_df)
                 log_event(st.session_state.session_id, "inference_triggered", "User ran column inference")
 
         if "metadata_df" in st.session_state:
@@ -1092,7 +1099,7 @@ with tab2:
 
             st.subheader("📊 Data Quality Report")
             if st.button("Generate Quality Report"):
-                st.session_state.quality_report = generate_quality_report(df, metadata_df)
+                st.session_state.quality_report = generate_quality_report(working_df, metadata_df)
                 log_event(st.session_state.session_id, "quality_report_generated",
                            f"overall_score={st.session_state.quality_report['overall_score']}")
 
